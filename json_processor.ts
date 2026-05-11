@@ -124,10 +124,7 @@ async function main(): Promise<void> {
 	const [jsonPath, dbName, collectionName] = process.argv.slice(2);
 	const mongodbUri = process.env.MONGODB_URI;
 
-	// if (!jsonPath || !dbName || !collectionName) {
-	// 	console.error("Usage: ts-node json_processor.ts <jsonPath> <dbName> <collectionName>");
-	// 	process.exit(1);
-	// }
+	console.log("database url", mongodbUri)
 	if (!jsonPath || !dbName) {
 		console.error("Usage: ts-node json_processor.ts <jsonPath> <dbName> <collectionName>");
 		process.exit(1);
