@@ -11,7 +11,7 @@ run `tsc` to compile typescript files to javascript files
 
 export MONGODB_URI=`mongodburl`
 
-e.g export MONGODB_URI=mongodb+srv://dev:VamsJofqAHrttwAO@smartclinicdemo.ucclrvh.mongodb.net/smartclinic?retryWrites=true&w=majority
+e.g export MONGODB_URI=
 
 
 then run `node json_processor.js path-to-json-file database-name` 
