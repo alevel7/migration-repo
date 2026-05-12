@@ -61,10 +61,7 @@ function main() {
         var _a, _b, _c, _d;
         const [jsonPath, dbName, collectionName] = process.argv.slice(2);
         const mongodbUri = process.env.MONGODB_URI;
-        // if (!jsonPath || !dbName || !collectionName) {
-        // 	console.error("Usage: ts-node json_processor.ts <jsonPath> <dbName> <collectionName>");
-        // 	process.exit(1);
-        // }
+        console.log("database url", mongodbUri);
         if (!jsonPath || !dbName) {
             console.error("Usage: ts-node json_processor.ts <jsonPath> <dbName> <collectionName>");
             process.exit(1);
@@ -154,23 +151,27 @@ function main() {
                 });
                 if (!consultant) {
                     console.warn(`Consultant not found for name: ${appointment.consultant}`);
-                    throw new Error(`Consultant not found for name: ${appointment.consultant}`);
+                    // continue;
+                    // throw new Error(`Consultant not found for name: ${appointment.consultant}`);
                 }
-                if (!patient) {
+                if (!patient || !patient._id) {
+                    console.log("patient", patient === null || patient === void 0 ? void 0 : patient._id);
                     console.warn(`Patient not found for hospital number: ${appointment.patient_hospital_no}`);
-                    throw new Error(`Patient not found for hospital number: ${appointment.patient_hospital_no}`);
+                    continue;
+                    // throw new Error(`Patient not found for hospital number: ${appointment.patient_hospital_no}`);
                 }
                 if (!department) {
                     console.warn(`Department not found for name: ${appointment.department}`);
-                    throw new Error(`Department not found for name: ${appointment.department}`);
+                    // continue;
+                    // throw new Error(`Department not found for name: ${appointment.department}`);
                 }
                 console.log(`Done with appointment ${appointment.secret_id}`);
                 mappedAppointment.push({
                     appointment_time: appointment.appointment_time,
-                    consultant: (_a = consultant._id) === null || _a === void 0 ? void 0 : _a.toString(),
-                    department: (_b = department._id) === null || _b === void 0 ? void 0 : _b.toString(),
+                    consultant: (_a = consultant === null || consultant === void 0 ? void 0 : consultant._id) === null || _a === void 0 ? void 0 : _a.toString(),
+                    department: (_b = department === null || department === void 0 ? void 0 : department._id) === null || _b === void 0 ? void 0 : _b.toString(),
                     patient: (_c = patient._id) === null || _c === void 0 ? void 0 : _c.toString(),
-                    department_route: department.route,
+                    department_route: department === null || department === void 0 ? void 0 : department.route,
                     secret_id: appointment.secret_id,
                 });
             }
@@ -225,19 +226,23 @@ function main() {
                 const appointment = yield appointmentRecords.findOne({ secret_id: consultation.secret_id });
                 if (!appointment) {
                     console.warn(`Appointment not found for secret ID: ${consultation.secret_id}`);
-                    throw new Error(`Appointment not found for secret ID: ${consultation.secret_id}`);
+                    continue;
+                    // throw new Error(`Appointment not found for secret ID: ${consultation.secret_id}`);
                 }
                 if (!patient) {
                     console.warn(`Patient not found for hospital number: ${consultation.patient_hospital_no}`);
-                    throw new Error(`Patient not found for hospital number: ${consultation.patient_hospital_no}`);
+                    continue;
+                    // throw new Error(`Patient not found for hospital number: ${consultation.patient_hospital_no}`);
                 }
                 if (!consultant) {
                     console.warn(`Consultant not found for name: ${consultation.consultant}`);
-                    throw new Error(`Consultant not found for name: ${consultation.consultant}`);
+                    // continue;
+                    // throw new Error(`Consultant not found for name: ${consultation.consultant}`);
                 }
                 if (!department) {
                     console.warn(`Department not found for name: ${consultation.department}`);
-                    throw new Error(`Department not found for name: ${consultation.department}`);
+                    // continue;
+                    // throw new Error(`Department not found for name: ${consultation.department}`);
                 }
                 console.log(`Done with consultation ${consultation.department}`);
                 mappedConsultation.push({
@@ -247,7 +252,7 @@ function main() {
                     examination: consultation.examination,
                     notes: consultation.notes,
                     patient: (_d = patient._id) === null || _d === void 0 ? void 0 : _d.toString(),
-                    department_route: department.route,
+                    department_route: department === null || department === void 0 ? void 0 : department.route,
                     appointment: appointment.secret_id,
                 });
             }

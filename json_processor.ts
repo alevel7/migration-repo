@@ -37,10 +37,10 @@ type Clinic = {
 
 type appointmentRecord = {
 	appointment_time: string;
-	consultant: string;
-	department: string;
+	consultant?: string;
+	department?: string;
 	patient: string;
-	department_route: string;
+	department_route?: string;
 	secret_id: string // not part of the main app schema but added here for easy retrieval of the appointment record for the consultation record
 }
 
@@ -52,7 +52,7 @@ type consultationRecord = {
 	notes: string;
 	appointment: string;
 	patient: string;
-	department_route: string;
+	department_route?: string;
 }
 
 type patient = {
@@ -247,26 +247,30 @@ async function main(): Promise<void> {
 
 			if (!consultant) {
 				console.warn(`Consultant not found for name: ${appointment.consultant}`);
-				throw new Error(`Consultant not found for name: ${appointment.consultant}`);
+				// continue;
+				// throw new Error(`Consultant not found for name: ${appointment.consultant}`);
 			}
-			if (!patient) {
+			if (!patient || !patient._id) {
+				console.log("patient", patient?._id)
 				console.warn(`Patient not found for hospital number: ${appointment.patient_hospital_no}`);
-				throw new Error(`Patient not found for hospital number: ${appointment.patient_hospital_no}`);
+				continue;
+				// throw new Error(`Patient not found for hospital number: ${appointment.patient_hospital_no}`);
 			}
 
 			if (!department) {
 				console.warn(`Department not found for name: ${appointment.department}`);
-				throw new Error(`Department not found for name: ${appointment.department}`);
+				// continue;
+				// throw new Error(`Department not found for name: ${appointment.department}`);
 			}
 
 			console.log(`Done with appointment ${appointment.secret_id}`);
 
 			mappedAppointment.push({
 				appointment_time: appointment.appointment_time,
-				consultant: consultant._id?.toString(),
-				department: department._id?.toString(),
+				consultant: consultant?._id?.toString(),
+				department: department?._id?.toString(),
 				patient: patient._id?.toString(),
-				department_route: department.route,
+				department_route: department?.route,
 				secret_id: appointment.secret_id,
 			});
 		}
@@ -334,22 +338,26 @@ async function main(): Promise<void> {
 
 			if (!appointment) {
 				console.warn(`Appointment not found for secret ID: ${consultation.secret_id}`);
-				throw new Error(`Appointment not found for secret ID: ${consultation.secret_id}`);
+				continue;
+				// throw new Error(`Appointment not found for secret ID: ${consultation.secret_id}`);
 			}
 
 			if (!patient) {
 				console.warn(`Patient not found for hospital number: ${consultation.patient_hospital_no}`);
-				throw new Error(`Patient not found for hospital number: ${consultation.patient_hospital_no}`);
+				continue;
+				// throw new Error(`Patient not found for hospital number: ${consultation.patient_hospital_no}`);
 			}
 
 			if (!consultant) {
 				console.warn(`Consultant not found for name: ${consultation.consultant}`);
-				throw new Error(`Consultant not found for name: ${consultation.consultant}`);
+				// continue;
+				// throw new Error(`Consultant not found for name: ${consultation.consultant}`);
 			}
 
 			if (!department) {
 				console.warn(`Department not found for name: ${consultation.department}`);
-				throw new Error(`Department not found for name: ${consultation.department}`);
+				// continue;
+				// throw new Error(`Department not found for name: ${consultation.department}`);
 			}
 
 			console.log(`Done with consultation ${consultation.department}`);
@@ -360,7 +368,7 @@ async function main(): Promise<void> {
 				examination: consultation.examination,
 				notes: consultation.notes,
 				patient: patient._id?.toString(),
-				department_route: department.route,
+				department_route: department?.route,
 				appointment: appointment.secret_id,
 			});
 		}
