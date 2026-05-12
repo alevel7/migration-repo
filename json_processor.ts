@@ -120,6 +120,25 @@ async function insertInBatches<T>(
 	}
 }
 
+function chunkArray<T>(items: T[], size: number): T[][] {
+	const chunks: T[][] = [];
+	for (let cursor = 0; cursor < items.length; cursor += size) {
+		chunks.push(items.slice(cursor, cursor + size));
+	}
+	return chunks;
+}
+
+function uniqueByLowerCase(values: string[]): string[] {
+	const firstSeen = new Map<string, string>();
+	for (const value of values) {
+		const lowerCaseValue = value.toLowerCase();
+		if (!firstSeen.has(lowerCaseValue)) {
+			firstSeen.set(lowerCaseValue, value);
+		}
+	}
+	return Array.from(firstSeen.values());
+}
+
 async function main(): Promise<void> {
 	const [jsonPath, dbName, collectionName] = process.argv.slice(2);
 	const mongodbUri = process.env.MONGODB_URI;
@@ -154,12 +173,8 @@ async function main(): Promise<void> {
 			.filter((clinic) => clinic.length > 0),
 	);
 
-	const uniqueStaffs = Array.from(new Set(allStaffs.map((name) => name.toLowerCase()))).map(
-		(lowerName) => allStaffs.find((name) => name.toLowerCase() === lowerName) ?? lowerName,
-	);
-	const uniqueClinics = Array.from(new Set(allClinics.map((name) => name.toLowerCase()))).map(
-		(lowerName) => allClinics.find((name) => name.toLowerCase() === lowerName) ?? lowerName,
-	);
+	const uniqueStaffs = uniqueByLowerCase(allStaffs);
+	const uniqueClinics = uniqueByLowerCase(allClinics);
 
 	const transformedStaff = uniqueStaffs.map((name, index) => createStaff(name, index));
 	const transformedClinic = uniqueClinics.map((name, index) => createClinic(name, index));
@@ -177,7 +192,24 @@ async function main(): Promise<void> {
 		const appointmentRecords = client.db(dbName).collection<appointmentRecord>('appointmentRecords');
 		const consultations = client.db(dbName).collection<consultationRecord>('consultations');
 
+		const indexJobs = [
+			staffs.createIndex({ email: 1 }, { unique: true }),
+			clinics.createIndex({ name: 1 }, { unique: true }),
+			patients.createIndex({ hospital_number: 1 }),
+			patients.createIndex({ old_hospital_number: 1 }),
+			appointmentRecords.createIndex({ secret_id: 1 }, { unique: true }),
+			consultations.createIndex({ appointment: 1 }, { unique: true }),
+		];
+		const indexResults = await Promise.allSettled(indexJobs);
+		for (const [index, result] of indexResults.entries()) {
+			if (result.status === "rejected") {
+				console.warn(`Index setup warning #${index + 1}: ${result.reason}`);
+			}
+		}
 
+		const uniquePatientHospitalNumbers = Array.from(
+			new Set(sourceRecords.map((record) => record.hospital_no.trim()).filter(Boolean)),
+		);
 
 		// create new staffs
 		const staffOperations: AnyBulkWriteOperation<staffName>[] = transformedStaff.map((staff) => ({
@@ -210,97 +242,167 @@ async function main(): Promise<void> {
 		}, batchSize);
 		console.log(`Imported ${transformedClinic.length} records into ${dbName}.${'departments'}`);
 
-		// create new appointment records
-		const allAppointments = sourceRecords.flatMap((record) =>
-			record.encounters.map((encounter) => ({
-				appointment_time: encounter.appointment_date,
-				consultant: normalizePersonName(encounter.consultant),
-				department: normalizePersonName(encounter.clinic),
-				patient_hospital_no: record.hospital_no.trim(),
-				secret_id: encounter.appointment_id.trim(),
-			})),
-		);
-
-		const uniqueAppointments = Array.from(
-			new Map(allAppointments.map((appointment) => [appointment.secret_id, appointment])).values(),
-		);
-
-		console.log(`Mapping ${uniqueAppointments.length} records into...`);
-		const mappedAppointment: appointmentRecord[] = [];
-		for (const appointment of uniqueAppointments) {
-			const { email } = createStaff(appointment.consultant, 0);
-			const consultant = await staffs.findOne({
-				email,
-			});
-
-			const { name } = createClinic(appointment.department, 0);
-			const department = await clinics.findOne({
-				name,
-			});
-
-			const patient = await patients.findOne({
-				$or: [
-					{ hospital_number: appointment.patient_hospital_no },
-					{ old_hospital_number: appointment.patient_hospital_no },
-				],
-			});
-
-			if (!consultant) {
-				console.warn(`Consultant not found for name: ${appointment.consultant}`);
-				// continue;
-				// throw new Error(`Consultant not found for name: ${appointment.consultant}`);
+		const staffLookup = new Map<string, string>();
+		const staffEmails = transformedStaff.map((staff) => staff.email);
+		for (const emailBatch of chunkArray(staffEmails, batchSize)) {
+			const staffDocs = await staffs.find(
+				{ email: { $in: emailBatch } },
+				{ projection: { _id: 1, email: 1 } },
+			).toArray();
+			for (const staff of staffDocs) {
+				if (staff?._id && staff.email) {
+					staffLookup.set(staff.email, staff._id.toString());
+				}
 			}
-			if (!patient || !patient._id) {
-				console.log("patient", patient?._id)
+		}
+
+		const clinicLookup = new Map<string, { id: string; route: string }>();
+		const clinicNames = transformedClinic.map((clinic) => clinic.name);
+		for (const clinicBatch of chunkArray(clinicNames, batchSize)) {
+			const clinicDocs = await clinics.find(
+				{ name: { $in: clinicBatch } },
+				{ projection: { _id: 1, name: 1, route: 1 } },
+			).toArray();
+			for (const clinic of clinicDocs) {
+				if (clinic?._id && clinic.name) {
+					clinicLookup.set(normalizePersonName(clinic.name).toLowerCase(), {
+						id: clinic._id.toString(),
+						route: clinic.route,
+					});
+				}
+			}
+		}
+
+		const patientLookup = new Map<string, string>();
+		for (const patientBatch of chunkArray(uniquePatientHospitalNumbers, 4000)) {
+			const patientDocs = await patients.find(
+				{
+					$or: [
+						{ hospital_number: { $in: patientBatch } },
+						{ old_hospital_number: { $in: patientBatch } },
+					],
+				},
+				{ projection: { _id: 1, hospital_number: 1, old_hospital_number: 1 } },
+			).toArray();
+
+			for (const patient of patientDocs) {
+				if (!patient?._id) {
+					continue;
+				}
+				const patientId = patient._id.toString();
+				const hospitalNumber = patient.hospital_number?.trim();
+				const oldHospitalNumber = patient.old_hospital_number?.trim();
+				if (hospitalNumber) {
+					patientLookup.set(hospitalNumber, patientId);
+				}
+				if (oldHospitalNumber) {
+					patientLookup.set(oldHospitalNumber, patientId);
+				}
+			}
+		}
+
+		const uniqueAppointmentMap = new Map<string, {
+			appointment_time: string;
+			consultant: string;
+			department: string;
+			patient_hospital_no: string;
+			secret_id: string;
+		}>();
+		for (const record of sourceRecords) {
+			for (const encounter of record.encounters) {
+				const secretId = encounter.appointment_id.trim();
+				if (!secretId) {
+					continue;
+				}
+				uniqueAppointmentMap.set(secretId, {
+					appointment_time: encounter.appointment_date,
+					consultant: normalizePersonName(encounter.consultant),
+					department: normalizePersonName(encounter.clinic),
+					patient_hospital_no: record.hospital_no.trim(),
+					secret_id: secretId,
+				});
+			}
+		}
+
+		const uniqueAppointments = Array.from(uniqueAppointmentMap.values());
+		console.log(`Mapping ${uniqueAppointments.length} records into appointmentRecords...`);
+		const mappedAppointment: appointmentRecord[] = [];
+		let skippedAppointmentsForMissingPatient = 0;
+		for (const [index, appointment] of uniqueAppointments.entries()) {
+			const { email } = createStaff(appointment.consultant, 0);
+			const consultantId = staffLookup.get(email);
+
+			const departmentLookupKey = normalizePersonName(appointment.department).toLowerCase();
+			const department = clinicLookup.get(departmentLookupKey);
+
+			const patientId = patientLookup.get(appointment.patient_hospital_no);
+
+			if (!consultantId) {
+				console.warn(`Consultant not found for name: ${appointment.consultant}`);
+			}
+			if (!patientId) {
+				skippedAppointmentsForMissingPatient += 1;
 				console.warn(`Patient not found for hospital number: ${appointment.patient_hospital_no}`);
 				continue;
-				// throw new Error(`Patient not found for hospital number: ${appointment.patient_hospital_no}`);
 			}
 
 			if (!department) {
 				console.warn(`Department not found for name: ${appointment.department}`);
-				// continue;
-				// throw new Error(`Department not found for name: ${appointment.department}`);
 			}
-
-			console.log(`Done with appointment ${appointment.secret_id}`);
 
 			mappedAppointment.push({
 				appointment_time: appointment.appointment_time,
-				consultant: consultant?._id?.toString(),
-				department: department?._id?.toString(),
-				patient: patient._id?.toString(),
+				consultant: consultantId,
+				department: department?.id,
+				patient: patientId,
 				department_route: department?.route,
 				secret_id: appointment.secret_id,
 			});
+
+			if ((index + 1) % 1000 === 0) {
+				console.log(`Mapped ${index + 1}/${uniqueAppointments.length} appointment records...`);
+			}
 		}
 
-		console.log(`Importing ${uniqueAppointments.length} records into ${dbName}.${'appointmentRecords'}...`);
-		const appointmentOperations: AnyBulkWriteOperation<appointmentRecord>[] = [];
-		for (const appointment of mappedAppointment) {
-			appointmentOperations.push({
-				updateOne: {
-					filter: { secret_id: appointment.secret_id },
-					update: { $setOnInsert: appointment },
-					upsert: true,
-				},
-			});
-		}
+		console.log(`Importing ${mappedAppointment.length} records into ${dbName}.${'appointmentRecords'}...`);
+		const appointmentOperations: AnyBulkWriteOperation<appointmentRecord>[] = mappedAppointment.map((appointment) => ({
+			updateOne: {
+				filter: { secret_id: appointment.secret_id },
+				update: { $setOnInsert: appointment },
+				upsert: true,
+			},
+		}));
 		await insertInBatches<AnyBulkWriteOperation<appointmentRecord>>(appointmentOperations, async (batch) => {
 			await appointmentRecords.bulkWrite(batch, { ordered: false });
 		}, batchSize);
-		console.log(`Imported ${mappedAppointment.length} records into ${dbName}.${'appointmentRecords'}`);
+		console.log(`Imported ${mappedAppointment.length} records into ${dbName}.${'appointmentRecords'} (skipped ${skippedAppointmentsForMissingPatient} with missing patient)`);
 
 		// create new consultations records
-		const allConsultations = sourceRecords.flatMap((record) =>
-			record.encounters.map((encounter) => {
-				const clinicalNote = encounter.clinical_notes?.[0];
+		const uniqueConsultationMap = new Map<string, {
+			complaintII: string;
+			complaint_history: string;
+			uncoded_diagnosis: string[];
+			examination: string;
+			notes: string;
+			patient_hospital_no: string;
+			consultant: string;
+			department: string;
+			secret_id: string;
+		}>();
 
+		for (const record of sourceRecords) {
+			for (const encounter of record.encounters) {
+				const secretId = encounter.appointment_id.trim();
+				if (!secretId) {
+					continue;
+				}
+
+				const clinicalNote = encounter.clinical_notes?.[0];
 				if (!clinicalNote) {
 					throw new Error(`Missing clinical notes for appointment ID: ${encounter.appointment_id}`);
 				}
 
-				return {
+				uniqueConsultationMap.set(secretId, {
 					complaintII: clinicalNote.chief_complaint?.trim() ?? "",
 					complaint_history: clinicalNote.history?.trim() ?? "",
 					uncoded_diagnosis: [clinicalNote.diagnosis?.trim() ?? ""].filter(Boolean),
@@ -309,69 +411,71 @@ async function main(): Promise<void> {
 					patient_hospital_no: record.hospital_no.trim(),
 					consultant: normalizePersonName(encounter.consultant),
 					department: normalizePersonName(encounter.clinic),
-					secret_id: encounter.appointment_id.trim(),
-				};
-			}),
-		);
+					secret_id: secretId,
+				});
+			}
+		}
 
-		const uniqueConsultations = Array.from(
-			new Map(allConsultations.map((consultation) => [consultation.secret_id, consultation])).values(),
-		);
+		const uniqueConsultations = Array.from(uniqueConsultationMap.values());
+		const consultationSecretIds = uniqueConsultations.map((consultation) => consultation.secret_id);
+		const appointmentLookup = new Set<string>(mappedAppointment.map((appointment) => appointment.secret_id));
+		for (const secretIdBatch of chunkArray(consultationSecretIds, 4000)) {
+			const appointmentDocs = await appointmentRecords.find(
+				{ secret_id: { $in: secretIdBatch } },
+				{ projection: { secret_id: 1 } },
+			).toArray();
+			for (const appointment of appointmentDocs) {
+				if (appointment.secret_id) {
+					appointmentLookup.add(appointment.secret_id);
+				}
+			}
+		}
 
-		console.log(`Mapping ${uniqueConsultations.length} records into...`);
+		console.log(`Mapping ${uniqueConsultations.length} records into consultations...`);
 		const mappedConsultation: consultationRecord[] = [];
-		for (const consultation of uniqueConsultations) {
+		let skippedConsultationsForMissingPatient = 0;
+		for (const [index, consultation] of uniqueConsultations.entries()) {
 			const { email } = createStaff(consultation.consultant, 0);
-			const consultant = await staffs.findOne({ email });
+			const consultantId = staffLookup.get(email);
+			const department = clinicLookup.get(normalizePersonName(consultation.department).toLowerCase());
+			const patientId = patientLookup.get(consultation.patient_hospital_no);
+			const appointmentExists = appointmentLookup.has(consultation.secret_id);
 
-			const { name } = createClinic(consultation.department, 0);
-			const department = await clinics.findOne({ name });
-
-			const patient = await patients.findOne({
-				$or: [
-					{ hospital_number: consultation.patient_hospital_no },
-					{ old_hospital_number: consultation.patient_hospital_no },
-				],
-			});
-
-			const appointment = await appointmentRecords.findOne({ secret_id: consultation.secret_id });
-
-			if (!appointment) {
+			if (!appointmentExists) {
 				console.warn(`Appointment not found for secret ID: ${consultation.secret_id}`);
 				continue;
-				// throw new Error(`Appointment not found for secret ID: ${consultation.secret_id}`);
 			}
 
-			if (!patient) {
+			if (!patientId) {
+				skippedConsultationsForMissingPatient += 1;
 				console.warn(`Patient not found for hospital number: ${consultation.patient_hospital_no}`);
 				continue;
-				// throw new Error(`Patient not found for hospital number: ${consultation.patient_hospital_no}`);
 			}
 
-			if (!consultant) {
+			if (!consultantId) {
 				console.warn(`Consultant not found for name: ${consultation.consultant}`);
-				// continue;
-				// throw new Error(`Consultant not found for name: ${consultation.consultant}`);
 			}
 
 			if (!department) {
 				console.warn(`Department not found for name: ${consultation.department}`);
-				// continue;
-				// throw new Error(`Department not found for name: ${consultation.department}`);
 			}
 
-			console.log(`Done with consultation ${consultation.department}`);
 			mappedConsultation.push({
 				complaintII: consultation.complaintII,
 				complaint_history: consultation.complaint_history,
 				uncoded_diagnosis: consultation.uncoded_diagnosis,
 				examination: consultation.examination,
 				notes: consultation.notes,
-				patient: patient._id?.toString(),
+				patient: patientId,
 				department_route: department?.route,
-				appointment: appointment.secret_id,
+				appointment: consultation.secret_id,
 			});
+
+			if ((index + 1) % 1000 === 0) {
+				console.log(`Mapped ${index + 1}/${uniqueConsultations.length} consultation records...`);
+			}
 		}
+		console.log(`Consultations skipped for missing patient: ${skippedConsultationsForMissingPatient}`);
 
 		console.log(`Importing ${mappedConsultation.length} records into ${dbName}.${'consultations'}...`);
 		const consultationOperations: AnyBulkWriteOperation<consultationRecord>[] = [];
