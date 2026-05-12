@@ -262,6 +262,16 @@ function main() {
                 yield appointmentRecords.bulkWrite(batch, { ordered: false });
             }), batchSize);
             console.log(`Imported ${mappedAppointment.length} records into ${dbName}.${'appointmentRecords'} (skipped ${skippedAppointmentsForMissingPatient} with missing patient)`);
+            const appointmentLookup = new Map();
+            const appointmentSecretIds = mappedAppointment.map((appointment) => appointment.secret_id);
+            for (const secretIdBatch of chunkArray(appointmentSecretIds, 4000)) {
+                const appointmentDocs = yield appointmentRecords.find({ secret_id: { $in: secretIdBatch } }, { projection: { _id: 1, secret_id: 1 } }).toArray();
+                for (const appointment of appointmentDocs) {
+                    if (appointment._id && appointment.secret_id) {
+                        appointmentLookup.set(appointment.secret_id, appointment._id);
+                    }
+                }
+            }
             // create new consultations records
             const uniqueConsultationMap = new Map();
             for (const record of sourceRecords) {
@@ -288,16 +298,6 @@ function main() {
                 }
             }
             const uniqueConsultations = Array.from(uniqueConsultationMap.values());
-            const consultationSecretIds = uniqueConsultations.map((consultation) => consultation.secret_id);
-            const appointmentLookup = new Set(mappedAppointment.map((appointment) => appointment.secret_id));
-            for (const secretIdBatch of chunkArray(consultationSecretIds, 4000)) {
-                const appointmentDocs = yield appointmentRecords.find({ secret_id: { $in: secretIdBatch } }, { projection: { secret_id: 1 } }).toArray();
-                for (const appointment of appointmentDocs) {
-                    if (appointment.secret_id) {
-                        appointmentLookup.add(appointment.secret_id);
-                    }
-                }
-            }
             console.log(`Mapping ${uniqueConsultations.length} records into consultations...`);
             const mappedConsultation = [];
             let skippedConsultationsForMissingPatient = 0;
@@ -306,8 +306,8 @@ function main() {
                 const consultantId = staffLookup.get(email);
                 const department = clinicLookup.get(normalizePersonName(consultation.department).toLowerCase());
                 const patientId = patientLookup.get(consultation.patient_hospital_no);
-                const appointmentExists = appointmentLookup.has(consultation.secret_id);
-                if (!appointmentExists) {
+                const appointmentId = appointmentLookup.get(consultation.secret_id);
+                if (!appointmentId) {
                     console.warn(`Appointment not found for secret ID: ${consultation.secret_id}`);
                     continue;
                 }
@@ -330,7 +330,7 @@ function main() {
                     notes: consultation.notes,
                     patient: patientId,
                     department_route: department === null || department === void 0 ? void 0 : department.route,
-                    appointment: consultation.secret_id,
+                    appointment: appointmentId,
                 });
                 if ((index + 1) % 1000 === 0) {
                     console.log(`Mapped ${index + 1}/${uniqueConsultations.length} consultation records...`);

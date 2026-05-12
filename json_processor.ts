@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { MongoClient, OptionalId, AnyBulkWriteOperation } from "mongodb";
+import { MongoClient, OptionalId, AnyBulkWriteOperation, ObjectId } from "mongodb";
 
 // type RawRecord = Record<string, unknown>;
 type RawRecord = {
@@ -50,7 +50,7 @@ type consultationRecord = {
 	uncoded_diagnosis: string[];
 	examination: string;
 	notes: string;
-	appointment: string;
+	appointment: ObjectId;
 	patient: string;
 	department_route?: string;
 }
@@ -377,6 +377,20 @@ async function main(): Promise<void> {
 		}, batchSize);
 		console.log(`Imported ${mappedAppointment.length} records into ${dbName}.${'appointmentRecords'} (skipped ${skippedAppointmentsForMissingPatient} with missing patient)`);
 
+		const appointmentLookup = new Map<string, ObjectId>();
+		const appointmentSecretIds = mappedAppointment.map((appointment) => appointment.secret_id);
+		for (const secretIdBatch of chunkArray(appointmentSecretIds, 4000)) {
+			const appointmentDocs = await appointmentRecords.find(
+				{ secret_id: { $in: secretIdBatch } },
+				{ projection: { _id: 1, secret_id: 1 } },
+			).toArray();
+			for (const appointment of appointmentDocs) {
+				if (appointment._id && appointment.secret_id) {
+					appointmentLookup.set(appointment.secret_id, appointment._id);
+				}
+			}
+		}
+
 		// create new consultations records
 		const uniqueConsultationMap = new Map<string, {
 			complaintII: string;
@@ -417,19 +431,6 @@ async function main(): Promise<void> {
 		}
 
 		const uniqueConsultations = Array.from(uniqueConsultationMap.values());
-		const consultationSecretIds = uniqueConsultations.map((consultation) => consultation.secret_id);
-		const appointmentLookup = new Set<string>(mappedAppointment.map((appointment) => appointment.secret_id));
-		for (const secretIdBatch of chunkArray(consultationSecretIds, 4000)) {
-			const appointmentDocs = await appointmentRecords.find(
-				{ secret_id: { $in: secretIdBatch } },
-				{ projection: { secret_id: 1 } },
-			).toArray();
-			for (const appointment of appointmentDocs) {
-				if (appointment.secret_id) {
-					appointmentLookup.add(appointment.secret_id);
-				}
-			}
-		}
 
 		console.log(`Mapping ${uniqueConsultations.length} records into consultations...`);
 		const mappedConsultation: consultationRecord[] = [];
@@ -439,9 +440,9 @@ async function main(): Promise<void> {
 			const consultantId = staffLookup.get(email);
 			const department = clinicLookup.get(normalizePersonName(consultation.department).toLowerCase());
 			const patientId = patientLookup.get(consultation.patient_hospital_no);
-			const appointmentExists = appointmentLookup.has(consultation.secret_id);
+			const appointmentId = appointmentLookup.get(consultation.secret_id);
 
-			if (!appointmentExists) {
+			if (!appointmentId) {
 				console.warn(`Appointment not found for secret ID: ${consultation.secret_id}`);
 				continue;
 			}
@@ -468,7 +469,7 @@ async function main(): Promise<void> {
 				notes: consultation.notes,
 				patient: patientId,
 				department_route: department?.route,
-				appointment: consultation.secret_id,
+				appointment: appointmentId,
 			});
 
 			if ((index + 1) % 1000 === 0) {
