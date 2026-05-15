@@ -190,7 +190,7 @@ function main() {
                     if (!(patient === null || patient === void 0 ? void 0 : patient._id)) {
                         continue;
                     }
-                    const patientId = patient._id.toString();
+                    const patientId = patient._id;
                     const hospitalNumber = (_a = patient.hospital_number) === null || _a === void 0 ? void 0 : _a.trim();
                     const oldHospitalNumber = (_b = patient.old_hospital_number) === null || _b === void 0 ? void 0 : _b.trim();
                     if (hospitalNumber) {
@@ -328,7 +328,7 @@ function main() {
                     uncoded_diagnosis: consultation.uncoded_diagnosis,
                     examination: consultation.examination,
                     notes: consultation.notes,
-                    patient: patientId,
+                    patient: patientId.toString(),
                     department_route: department === null || department === void 0 ? void 0 : department.route,
                     appointment: appointmentId,
                 });

@@ -39,7 +39,7 @@ type appointmentRecord = {
 	appointment_time: string;
 	consultant?: string;
 	department?: string;
-	patient: string;
+	patient: ObjectId;
 	department_route?: string;
 	secret_id: string // not part of the main app schema but added here for easy retrieval of the appointment record for the consultation record
 }
@@ -273,7 +273,7 @@ async function main(): Promise<void> {
 			}
 		}
 
-		const patientLookup = new Map<string, string>();
+		const patientLookup = new Map<string, ObjectId>();
 		for (const patientBatch of chunkArray(uniquePatientHospitalNumbers, 4000)) {
 			const patientDocs = await patients.find(
 				{
@@ -289,7 +289,7 @@ async function main(): Promise<void> {
 				if (!patient?._id) {
 					continue;
 				}
-				const patientId = patient._id.toString();
+				const patientId = patient._id;
 				const hospitalNumber = patient.hospital_number?.trim();
 				const oldHospitalNumber = patient.old_hospital_number?.trim();
 				if (hospitalNumber) {
@@ -467,7 +467,7 @@ async function main(): Promise<void> {
 				uncoded_diagnosis: consultation.uncoded_diagnosis,
 				examination: consultation.examination,
 				notes: consultation.notes,
-				patient: patientId,
+				patient: patientId.toString(),
 				department_route: department?.route,
 				appointment: appointmentId,
 			});
