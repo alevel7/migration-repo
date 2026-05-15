@@ -328,7 +328,7 @@ function main() {
                     uncoded_diagnosis: consultation.uncoded_diagnosis,
                     examination: consultation.examination,
                     notes: consultation.notes,
-                    patient: patientId.toString(),
+                    patient: patientId,
                     department_route: department === null || department === void 0 ? void 0 : department.route,
                     appointment: appointmentId,
                 });

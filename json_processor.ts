@@ -51,7 +51,7 @@ type consultationRecord = {
 	examination: string;
 	notes: string;
 	appointment: ObjectId;
-	patient: string;
+	patient: ObjectId;
 	department_route?: string;
 }
 
@@ -467,7 +467,7 @@ async function main(): Promise<void> {
 				uncoded_diagnosis: consultation.uncoded_diagnosis,
 				examination: consultation.examination,
 				notes: consultation.notes,
-				patient: patientId.toString(),
+				patient: patientId,
 				department_route: department?.route,
 				appointment: appointmentId,
 			});
