@@ -221,6 +221,7 @@ function main() {
                         sex: patientData.sex,
                         department_route: (_0 = targetDepartment === null || targetDepartment === void 0 ? void 0 : targetDepartment.route) !== null && _0 !== void 0 ? _0 : "",
                         raised_by_name: normalizePersonName(encounter.consultant),
+                        hospital_number: patientData.hospital_number,
                         secret_id: secretId,
                         is_follow_up: false,
                         complaint: [(_2 = (_1 = clinicalNote.chief_complaint) === null || _1 === void 0 ? void 0 : _1.trim()) !== null && _2 !== void 0 ? _2 : ""].filter(Boolean),

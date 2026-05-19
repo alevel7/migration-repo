@@ -54,6 +54,7 @@ type extractedConsultation = {
     patient_name: string;
     sex: string;
     department_route: string;
+    hospital_number:string;
     raised_by_name: string;
     secret_id: string;
     is_follow_up: boolean;
@@ -340,6 +341,7 @@ async function main(): Promise<void> {
                     sex: patientData.sex,
                     department_route: targetDepartment?.route ?? "",
                     raised_by_name: normalizePersonName(encounter.consultant),
+                    hospital_number: patientData.hospital_number,
                     secret_id: secretId,
                     is_follow_up: false,
                     complaint: [clinicalNote.chief_complaint?.trim() ?? ""].filter(Boolean),
