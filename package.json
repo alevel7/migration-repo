@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
-    "start": ""
+    "start": "node json_processor.js ./full_emr_clean.json smartclinic",
+    "extract-consultation": "node extract_consultations.js ./full_emr_clean.json ./consultations_extracted.json"
   },
   "keywords": [],
   "author": "",
